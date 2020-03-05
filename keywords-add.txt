@@ -1,0 +1,30 @@
+######### Additional keywords for  Audio library - Ethernet
+AudioControlEtherNet	KEYWORD2
+AudioInputNet	KEYWORD2
+AudioOutputNet	KEYWORD2
+
+setAudioTargetID	KEYWORD2
+setControl	KEYWORD2
+setStreamName	KEYWORD2
+setStreamID	KEYWORD2
+getCurPktNo	KEYWORD2
+subscribeStream	KEYWORD2
+releaseStream	KEYWORD2
+getActiveStreams	KEYWORD2
+getLocalStreamID	KEYWORD2
+getStream	KEYWORD2
+getQueuedUserControlMsg	KEYWORD2
+queueControlBlk	KEYWORD2
+getMyStream	KEYWORD2
+setMyNet	KEYWORD2
+getMyIP	KEYWORD2
+setMyID	KEYWORD2
+setMyMAC	KEYWORD2
+setListenlPort	KEYWORD2
+getListenlPort	KEYWORD2
+getLinkStatus	KEYWORD2
+hostIPtoHostID	KEYWORD2
+hostIDtoHostIP	KEYWORD2
+
+### no literals at this point  LITERAL1
+
