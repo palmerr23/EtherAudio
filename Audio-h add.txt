@@ -1,0 +1,7 @@
+/* Audio Library for Teensy 3.X
+Add these four entries to audio.h
+*/
+#include "audio_net.h" // RP
+#include "control_Ethernet.h" //RP
+#include "input_net.h" //RP
+#include "output_net.h" //RP
