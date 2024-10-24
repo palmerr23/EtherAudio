@@ -1,98 +1,64 @@
-/* Network output for Teensy Audio Library 
- * Richard Palmer - 2019
- * Modified from Frank Frank Bösing's SPDIF library
- * Copyright (c) 2015, Frank Bösing, f.boesing@gmx.de,
- * Thanks to KPC & Paul Stoffregen!
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice, development funding notice, and this permission
- * notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+/* Multi-channel Network Audio output for Teensy Audio Library 
+ * does NOT take update_responsibility
+ * Richard Palmer - 2024
+ * Released under GNU Affero General Public License v3.0 or later
+ * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-#ifndef output_Net_h_
-#define output_Net_h_
+#ifndef output2_Net_h_
+#define output2_Net_h_
+
+#define AUDIO_OUTPUT_CHANNELS 2
 
 #include "Arduino.h"
 #include "AudioStream.h"
-//#include "DMAChannel.h"
-//#include "SPI.h" // just to be safe
-#include "Ethernet.h"
-#include <EthernetUdp.h>
 #include "Audio.h"
 #include "audio_net.h"
 #include "control_ethernet.h"
-//#include "memcpy_audio.h"
 
+#define ON_DEBUG
 
 /*
  * This file just handles high-level block transfers and logical audio and control functions 
- * control_WIZNET does all the Ethernet setup work. They are mutual friend classes.
  * Audio data can be broadcast from a master to a number of slaves using an IP broadcast address, 
  * or simply transferred between two consenting hosts
- * local IP, MAC address are set up in control_WIZNET (as they stay the same for each host)
- * port and target IP are unique to each class - port is different for control messages, targets may differ, depending on what's being done.
- *
- * For most applications a master node will handle management tasks (including providing a DHCP service...) 
- * and possibly be the only node allowed to broadcast packets (other than ICMP, etc).
- * 
  */
- 
- /* 
- * This version is for 2 channel audio
- */
-#define NCHANNELS 2
-  
-class AudioControlEtherNet; // need this friend class
+
+#define DEFAULT_CHANNELS 2
 
 class AudioOutputNet : public AudioStream
 {
 public:
-	AudioOutputNet(void) : AudioStream(2, inputQueueArray) { begin(); }
-	void begin(void);	
-	virtual void update(void);
-	void setAudioTargetID(short targetID)  ; //sets the target HostID - last digit of IP address for the datagrams
-	void setControl(AudioControlEtherNet * cont) ;
-	void setStreamName(char * sName) ;
-	short setStreamID(short id);
-	unsigned long getCurPktNo(void) ;
+	AudioOutputNet(uint8_t outCh = DEFAULT_CHANNELS) : AudioStream(outCh, inputQueueArray) 
+	{
+		_outChans = outCh;
+		}
+	friend class AudioControlEthernet; // may not be required
 	
-	// need friend class AudioControlEtherNet; // work with the WIZNET control class
-protected:
-	audio_block_t *local_block_O[MAXCHANNELS];		
-	audio_block_t * local_block_out[MAXCHANNELS];
-	audio_block_t *inputQueueArray[2];
+	void begin(void);	
+	void update(void);
 
-	static void isr(void);
+	int subscribe(char *sName, IPAddress remoteIP = IPAddress((uint32_t)0)); // default to broadcast IP
+	// int subscribe(char *streamName, char *hostName) is not yet implemented
+	int missedTransmit(bool reset = true);	// get (and reset) the number of missed transmit buffer on update
+
+protected:
+	bool queueBlocks(void);
+	audio_block_t *inputQueueArray[MAXCHANNELS];
+	audio_block_t *block[MAXCHANNELS];	
+	std::queue <queuePkt> _myQueueO;
+	int _myStreamO = EOQ; // valid streamID is 0..255
+
 private:
 	bool outputBegun = false;
-	AudioControlEtherNet * myControl_O;
-	streamInfoPkt myStreamInfoO;
-	bool ethernetUp_O;
-	short aTargetID;	// default stream HostID for output blocks (audio and streamInfo)
-	
-	// status and control
-	//bool AudioOutputNet::update_responsibility = false; // Can't take update responsibility as no regular interrupts	
-	unsigned long currentPacket_O ; 
-	short _myObjectID; // registered ID for control queue data.
-	short myStreamID_O; // valid streamID is 0..255
-	short updateStreamMsgCntr; //
+	char _myStreamName[VBAN_STREAM_NAME_LENGTH] = "*";
+	uint32_t didNotTransmit = 0;
+	uint32_t _nextFrame = 0; 
+	uint8_t _outChans;
 
-	// debug variables
-	short qq;
-	short debugx;
+	// debug 
+	bool printMe;
+	void printHdr(vban_header *hdr);
+	void printSamples(int16_t *buff, int len, int chans);
 };
 #endif

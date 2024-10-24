@@ -1,188 +1,328 @@
-/* Network input for Teensy Audio Library 
- * Richard Palmer (C) 2019
- * Based on Paul Stoffregen's TDM library
- * Copyright (c) 2017, Paul Stoffregen
+/* Multi-channel Network input for Teensy Audio Library 
+ * does NOT take update_responsibility
+ * Richard Palmer (C) 2024
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice, development funding notice, and this permission
- * notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Released under GNU Affero General Public License v3.0 or later
+ * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
- // 2015/08/23: (FB) added mute_PCM() - sets or unsets VALID in VUCP (and adjusts PARITY)
- // ****** This object does not accept update_responsibility - ONE device that does needs to be in your sketch (e.g. a DAC output) ****
- // (RP)
- // All IO handling is in the Ethernet, EthernetUDP & SPI Libraries 
- // WIZNET handles registration of hosts, other control (not audio related) messaging through separate UDP port
- // This version handles 2 channels, 128 sample blocks. 
- // 8 channel version may need to split 128 sample blocks into two datagrams to avoid exceeding MTU of 1500 bytes
 
+#ifndef _INPUT_NET_HPP_
+#define _INPUT_NET_HPP_
 
 #include <Arduino.h>
 #include "input_net.h"
 
-// debugging
-#define IT_REPORT_EVERY 2000
-#define IN_ETH_SERIAL_DEBUG 1  // set to 0 for production 
 
-extern short bloxx;
 
 void AudioInputNet::begin(void)
 {
-	currentPacket_I = 0; // initialize packet sequence
-	myControl_I = NULL;
-	 _myObjectID = -1; 
-	memset(&zeroBlockI, 0, SAMPLES_2); // create an audio block of zeros for when no packets are available.
-	_myStream_I = -1; 
-	blocksRecd_I = missingBlocks_I = 0;
-	inputBegun = true;
-#if IN_ETH_SERIAL_DEBUG > 0
-Serial.print(AudioMemoryUsage());
-  Serial.println(" inputNet.begin() complete");
+	_myStreamI = -1; 	// **** should be unsubscribed: -1
+
+	// allocate enough audio blocks. If any fails, allocate none
+	// only release them if stopping 
+	int i, j;
+	for (i = 0; i < _inChans; i++) 
+	{
+
+#ifdef MALLOC_BUFS	
+		new_block[i] = (audio_block_t*)malloc(sizeof(audio_block_t));
+#else //can't allocate() in constructor
+		new_block[i] = allocate();
 #endif
+		if (new_block[i] == nullptr) 
+		{
+			for (j=0; j < i; j++) 
+			{
+#ifdef MALLOC_BUFS
+				free(new_block[j]);
+#else
+				release(new_block[j]);
+#endif
+			}	
+			Serial.println("Input begin: Can't allocate audio buffers");				
+			break;
+		}
+		memset(new_block[i]->data, 0, AUDIO_BLOCK_SAMPLES * 2);
+	}
+	inputBegun = true;
+	
+	Serial.printf("IN: inputNet.begin() complete, allocated OK %i\n", new_block[0] != nullptr );
 }
+
+
+//  update() will not be called if there are no connected patchCords
+//  Only transmit if queue has more than low water mark packets.
 
 void AudioInputNet::update(void)
 {
-short aIndex;
-	if (!inputBegun) // no processing at all until begin() is complete
-		return;
-
-#if IN_ETH_SERIAL_DEBUG > 15
-	Serial.print("{I ");
-	//Serial.print((myControl_I == NULL)? "NC " : "CTL ");
-#endif	
-	if (myControl_I == NULL) // transmit silence until the ethernet control is defined and enabled
-	{
-		transmit(&zeroBlockI, 0);
-		transmit(&zeroBlockI, 1);	
-		return;
-	}
-	if (!(myControl_I->ethernetEnabled))	// need sequential tests to avoid NULL pointer issues	
-	{
-		transmit(&zeroBlockI, 0);
-		transmit(&zeroBlockI, 1);	
-		return;
-	}
-		
-	//register for control queue packets if not already done 
-	if(_myObjectID < 0)
-		_myObjectID = myControl_I->registerObject();
+ static bool printMe = false;
+	itim++;
+#ifdef IN_DEBUG
+	printMe = itim % 500 == 0 &&  millis() > 4000;
+	itim++;
+#endif
 	
-	// check for audio packets from control_ethernet object for this stream
-	// transmit and release blocks
-	// audio blocks already created in ethernet_control - destroyed there as well
-	// get next block and mark as consumed by me (subscribed--)
-	aIndex = myControl_I->getNextAudioQblk_I( _myStream_I );  // anything in my subscribed stream? 
+	if(millis() - lastUpdate > 4)
+		Serial.printf("*** Missed update %i\n", _myStreamI);
+	lastUpdate = millis();
+	
+	if(!etherTran.linkIsUp()) //  uninitialised or disconnected
+		return;
 
-	if (aIndex != -1) { 		
-		currentPacket_I = myControl_I->Qblk_A[aIndex].sequence;
-		transmit(myControl_I->Qblk_A[aIndex].bufPtr[0], 0); // cleanup routine will release these blocks. as someone else might be subscribed
-		transmit(myControl_I->Qblk_A[aIndex].bufPtr[1], 1);		//myControl_I->Qblk_A[aIndex].subscribed--; // I'm subscribed to this stream, and have consumed this block 
-		blocksRecd_I++;
-	} 
-	else
-	{  // no current block from ethernet, so send a block of zeros 
-		transmit(&zeroBlockI, 0);
-		transmit(&zeroBlockI, 1);	
-		missingBlocks_I++;
-
-		// don't count missing blocks before link is up and reset after disconnection
-		if(myControl_I->getLinkStatus() && myControl_I->streamsIn[_myStream_I].active)
+	if(_myStreamI == EOQ) // unsubscribed - check for update
+	{
+		int temp = etherTran.getStreamFromSub(_mySubI);
+		if(temp == EOQ)
 		{
-
-//Serial.print(" *"); Serial.print(_myObjectID);
-
-#if IN_ETH_SERIAL_DEBUG > 0
-			Serial.print("*** Missing block: "); Serial.print(blocksRecd_I); 
-			Serial.print(" input["); Serial.print(_myObjectID); 
-			Serial.print("], total = "); Serial.print(missingBlocks_I);
-			if(blocksRecd_I > 0) 
-			{
-				Serial.print(". Loss ratio = "); Serial.print((float)missingBlocks_I*100/blocksRecd_I,3); Serial.print("%");
-			}
-			Serial.print(", AQ Free ");
-			Serial.println(myControl_I->countQ_A(&(myControl_I->audioQ_Free)));
-#endif
-		} else
-			blocksRecd_I = missingBlocks_I = 0; 
-	} // transmit block
+	//		if(printMe) Serial.printf("*** In Upd no stream %i, %i\n", _myStreamI, inputBegun);
+			return;
+		}
+		_myStreamI = temp;
+	}
+	int i, j;	
+	//if(printMe) Serial.printf("![%i,%i]", _myStreamI, _mySubI);
 	
-	// transit control queue looking for things we care about
-	// nothing defined at the moment.
-	// stream messages handled by network layer
-#if IN_ETH_SERIAL_DEBUG > 5
-			if ((it_report_cntr++ % IT_REPORT_EVERY )== 0)
-			{	
-			Serial.print("{I "); Serial.print(AudioMemoryUsage()); Serial.print("/"); 
-			Serial.print(bloxx); 
-			Serial.println("}");
-		 } 
-		 
-	// check and process control blocks
-	/*
-	 *	NOTHING YET DEFINED
-	 */
-	 
+	if(etherTran.streamsIn[_myStreamI].active == false)
+	{ 
+		if(printMe) Serial.println("*** Inactive stream");
+		return;
+	}
+
+	if(_myQueueI.size() == 0) // no packets to process
+	{
+		npiq++;
+#ifdef IN_DEBUG
+		if(printMe){Serial.printf("*** In upd NPIQ %i of 500\n", npiq); npiq = 0;}
 #endif
-#if IN_ETH_SERIAL_DEBUG > 15
-	Serial.println("}");
+		return;
+	}
+
+	// while the current buffer set is not filled:
+	// Move samples into audio buffers, using new packets if needed.
+	// It may take up to 3 packets to fill the buffers if the initial one has only a few samples left (min observed samples/pkt = 89).
+	int usedPkts = 1;
+	queuePkt * pkt;
+	while((_currentBuffer < AUDIO_BLOCK_SAMPLES) && (_myQueueI.size() > 0))
+	{
+		pkt = (queuePkt *)&_myQueueI.front();
+		int channels = pkt->hdr.format_nbc + 1;
+		int samples = pkt->hdr.format_nbs + 1;
+		int available = samples - qUsedSamples;
+		int needed = AUDIO_BLOCK_SAMPLES - _currentBuffer;
+		int copyThisBlock = min(available, needed);
+
+
+		if(pkt->hdr.nuFrame != (_lastQFrameNum + 1)) // dropped packet
+		{
+			framesDropped++;
+			if(framesDropped % 200 == 0)
+#ifdef IN_DEBUG
+				Serial.printf("++++++ In dropped frame %i, %i, q size %i\n", pkt->hdr.nuFrame, _lastQFrameNum, _myQueueI.size());
+#else
+					;
 #endif
-}
-
-void AudioInputNet::setControl(AudioControlEtherNet * cont) 
-{
-	myControl_I = cont; // set the control object associated with this input object
-} 
-
-bool AudioInputNet::subscribeStream(short stream) // subscribe to an audio stream	
-{ 
-	if(stream < 0 || stream >= myControl_I->activeTCPstreams_I) // not a legal streamID
-		return false; 
+		}
 		
-	if(_myStream_I >= 0) // already subscribed? release old stream
-		releaseStream();
+	//if(printMe) Serial.printf("!FC curBuf %i,used %3i,  need %3i, have %3i(copying %3i), chans %i [pkt %i], qSiz %i, frame %i\n", _currentBuffer, qUsedSamples, needed, available,  copyThisBlock, _inChans, channels, _myQueueI.size(), pkt->hdr.nuFrame);
+
+		//if(printMe) print6pkt(pkt, qUsedSamples, (qUsedSamples + copyThisBlock) * channels);
+	
+		for (j = 0; j < copyThisBlock; j++)	// does the order matter? Any prefetch should be better this way
+		{
+			for (i = 0; i < _inChans; i++)
+				if(i < channels) 
+					new_block[i]->data[j + _currentBuffer] = pkt->c.content16[(j + qUsedSamples) * channels + i]; // 16-bit samples
+				else
+					new_block[i]->data[j + _currentBuffer] = 0; // not enough incoming channels to supply all the 
+		}	
+		//if(printMe) print3buf(0, _currentBuffer, _currentBuffer + copyThisBlock);
 		
-	myControl_I->streamsIn[stream].subscribers++;
-	_myStream_I = stream; 
-	return true; 
-} 
-void AudioInputNet::releaseStream(void)  // release the subscribed stream. 
-{
-	if (_myStream_I >= 0)
-		myControl_I->streamsIn[_myStream_I].subscribers--;
-	_myStream_I = -1; 	
+		_currentBuffer +=	copyThisBlock;
+		
+		if(available > needed) // More than enough data in this packet. Use the rest for next buffer set.
+		{
+			qUsedSamples += copyThisBlock;	
+			if(_currentBuffer != AUDIO_BLOCK_SAMPLES) Serial.println("*** I upd: Full buffer not full");
+			// leave _lastQFrameNum alone: coming back to this packet next time
+				break; // buffer is full, so straight to transmit
+		}
+
+		if (available <= needed) // All samples used - free the packet
+		{
+			if(available == needed && _currentBuffer != AUDIO_BLOCK_SAMPLES) Serial.println("*** Full buffer not full _B");
+			qUsedSamples = 0;
+			_lastQFrameNum = pkt->hdr.nuFrame; // frame sequence check
+			cli(); // may not be required - already inside software interrupt
+				_myQueueI.pop(); // free used queue packet
+			sei();
+		}
+
+		if (available < needed) //  need to get another packet
+		{			
+			usedPkts++;
+		}
+	}	// while - fill buffer set 
+	
+	
+	// transmit full buffers, or come back next time and finish (out of packet warning)
+	if (_currentBuffer ==  AUDIO_BLOCK_SAMPLES)  
+	{		
+		//if(printMe) Serial.printf(" !TX %i, used %i pkts, chans %i\n", _myStreamI, usedPkts, _inChans);
+		// if we got 1 block, all  are filled
+		for (i = 0; i < _inChans; i++) 
+		{
+			transmit(new_block[i], i);
+		}
+		_currentBuffer = 0;
+	}
+	else{
+		didNotTransmit++;
+#ifdef IN_DEBUG
+		if(printMe) Serial.println("------- !In_update TX! Ran out of queued packets.");	
+#endif
+		//etherTran.cleanAQ_I(); 
+	}
+	//if(printMe)	Serial.printf("In pkts %i in Q %i\n",  _mySubI, _myQueueI.size());
+	return;
 }
 
-short AudioInputNet::getMyStream(void) 
+// subscribe to a stream from a (or any) host
+// stream does not need to be active for subscription
+// only 1 subscription per input_net object
+
+// default registration
+// register this object with subscriptions, hostname defaults to nullptr
+int AudioInputNet::subscribe(char * streamName, char * hostName)
 {
-	return _myStream_I; 
-}
- 
-short AudioInputNet::getNextStreamIndex(short thisStream)  // find the next active input stream
-{
-	short i;
-	thisStream++; //start at next index (i.e. 0 if thisStream == -1)
-	// else start
-	for(i = thisStream; i < myControl_I->activeTCPstreams_I; i++) // only active streams
-		if (myControl_I->streamsIn[i].active && myControl_I->streamsIn[i].hostStreamID >= 0)
+	if(_myStreamI != EOQ) // already subscribed
+		return _myStreamI;
+	int i;
+	int emptySlot = EOQ;
+	for (i = 0; i < MAX_SUBSCRIPTIONS; i++)
+	{
+		if(&_myQueueI == etherTran.subsIn[i].qPtr) // redundant(?) saftey check
 			return i;
-	return -1; // no next active stream
+		if(etherTran.subsIn[i].qPtr == nullptr && emptySlot == EOQ) // first empty slot
+			emptySlot = i;
+	}
+	if(emptySlot != EOQ) // there's space
+	{
+		// _myStreamI will be matched later
+		etherTran.subsIn[emptySlot].qPtr = &_myQueueI;
+		etherTran.subsIn[emptySlot].protocol = OK_VBAN_AUDIO_PROTO; // only accept 44.1 PCM16
+		etherTran.subsIn[emptySlot].active = true;
+		strncpy(etherTran.subsIn[emptySlot].streamName, streamName, VBAN_STREAM_NAME_LENGTH-1);
+		if(hostName != nullptr)
+			strncpy(etherTran.subsIn[emptySlot].hostName, hostName, VBAN_HOSTNAME_LEN-1);
+#ifdef IN_DEBUG
+		Serial.printf("--Subscribed Audio In to stream '%s', host '%s', slot %i\n", streamName, etherTran.subsIn[emptySlot].hostName, emptySlot);
+#endif
+		_mySubI = emptySlot;
+		return emptySlot;
+		// other particulars (e.g IP) will be filled in later
+	}
+	else
+		return EOQ;
 }
-void AudioInputNet::isr(void)
+
+// subscribe by name/IP
+int AudioInputNet::subscribe(char * streamName, IPAddress remoteIP)
 {
-	// do nothing - hardware control is by Ethernet
+	if(_myStreamI != EOQ) // already subscribed
+			return _myStreamI;
+	int i;
+	int emptySlot = EOQ;
+	for (i = 0; i < MAX_SUBSCRIPTIONS; i++)
+	{
+		if(&_myQueueI == etherTran.subsIn[i].qPtr) // redundant(?) saftey check
+			return i;
+		if(etherTran.subsIn[i].qPtr == nullptr && emptySlot == EOQ) // first empty slot
+			emptySlot = i;
+	}
+	if(emptySlot != EOQ) // there's space
+	 {
+		 etherTran.subsIn[emptySlot].qPtr = &_myQueueI;
+		 etherTran.subsIn[emptySlot].active = true;
+		 etherTran.subsIn[emptySlot].protocol = OK_VBAN_AUDIO_PROTO;
+		 strncpy(etherTran.subsIn[emptySlot].streamName, streamName, VBAN_STREAM_NAME_LENGTH-1);
+		 strcpy(etherTran.subsIn[emptySlot].streamName, "?");
+		 etherTran.subsIn[emptySlot].ipAddress = remoteIP;
+		 #ifdef IN_DEBUG
+		 Serial.printf("--Subscribed Audio In to '%s', slot %i, IP ", streamName, emptySlot);
+		 Serial.println(remoteIP);
+		 #endif
+		_mySubI = emptySlot;
+		 return emptySlot;
+	 }
+	return EOQ;
 }
+
+
+void AudioInputNet::unSubscribe(void)  // release the subscribed stream. 
+{
+	if (_myStreamI >= 0)
+	{
+		etherTran.streamsIn[_myStreamI].subscription = EOQ;
+		etherTran.subsIn[_myStreamI].active = false;
+	}
+	_myStreamI = EOQ; 	
+}
+
+int AudioInputNet::droppedFrames(bool reset)
+{
+	int temp;
+	temp = framesDropped;
+	if(reset)
+		framesDropped = 0;
+	return temp;
+}
+
+int AudioInputNet::getPktsInQueue()
+{
+	return _myQueueI.size();
+}
+	
+int AudioInputNet::missedTransmit(bool reset)
+{
+	int temp;
+	temp = didNotTransmit;
+	if(reset)
+		didNotTransmit = 0;
+	return temp;
+}
+
+	
+	
+// debug print packet contents
+
+void AudioInputNet::print6pkt(queuePkt * pkt, int first, int last)
+{
+#ifdef IN_DEBUG
+	int i;
+	Serial.printf("  P6PKT: [%i]", first);
+	for(i=0; i< 6; i++)
+		Serial.printf("%i ", pkt->c.content16[i]);
+	Serial.printf(" ... [%i] ", last);
+	for(i=last -6; i< last; i++)
+		Serial.printf("%i ", pkt->c.content16[i]);
+	Serial.println();
+#endif
+}
+
+// debug print buffer contents
+void AudioInputNet::print3buf(int indx, int first, int last)
+{
+#ifdef IN_DEBUG
+	int i;
+	Serial.printf("  P3BUF %i: [%i]", indx, first);
+	for(i=0; i< 3; i++)
+		Serial.printf("%i ", new_block[indx]->data[i]);
+	Serial.printf(" ... [%i] ", last);
+	for(i=last -3; i< last; i++)
+		Serial.printf("%i ", new_block[indx]->data[i]);
+	Serial.println();
+#endif
+}
+
+#endif

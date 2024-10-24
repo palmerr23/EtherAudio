@@ -1,95 +1,90 @@
-/* Network input for Teensy Audio Library 
- * Richard Palmer - 2019
- * Modified from Frank Frank Bösing's SPDIF library
- * Copyright (c) 2015, Frank Bösing, f.boesing@gmx.de,
+/* Multi-channel Network Audio input object for Teensy Audio Library 
+ * does NOT take update_responsibility
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice, development funding notice, and this permission
- * notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * Richard Palmer - 2024
+ * Released under GNU Affero General Public License v3.0 or later
+ * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-#ifndef input_AUDIO_NET_h_
-#define input_AUDIO_NET_h_
+#pragma once
 
 #include "Arduino.h"
 #include "AudioStream.h"
-//#include "DMAChannel.h"
-//#include "SPI.h" // just to be safe
-#include "Ethernet.h"
-#include <EthernetUdp.h>
 #include "Audio.h"
 #include "audio_net.h"
 #include "control_ethernet.h"
 
+#define IN_DEBUG
+
+//#define MALLOC_BUFS // allows begin() to be called by constructor
+
 /*
  * This file just handles high-level block transfers and logical audio and control functions 
- * control_ethernet does all the Ethernet setup work. They are mutual friend classes.
- * Audio data can be broadcast from a master to a number of slaves using an IP broadcast address, 
- * or simply transferred between two consenting hosts
- * local IP, MAC address are set up in control_ethernet (as they stay the same for each host)
- * port and target IP are unique to each class - port is different for control messages, targets may differ, depending on what's being done.
- *
- * For most applications a master node will handle management tasks (including providing a DHCP service...) 
- * and possibly be the only node allowed to broadcast packets (other than ICMP, etc).
  * 
  */
  
- /* 
- * This version is for 2 channel audio
- */
-  
-class AudioControlEtherNet; // need this friend class
+#define DEFAULT_CHANNELS 2
+// 6-8 audio channels need 2 packets per buffer
+//#define DEFAULT_INQ_SIZE	8
+//#define QUEUE_LOW_WATER		3 // don't process update if less.  3 packets may be needed to fill a buffer
 
-class AudioInputNet : public AudioStream
+extern  AudioControlEtherTransport etherTran; // handles all stream and subscription traffic
+
+class AudioInputNet : public AudioStream 
 {
 public:
-	AudioInputNet(void) : AudioStream(0, NULL) { begin(); }
-	void begin(void);	
-	virtual void update(void);
+	AudioInputNet(int inCh = DEFAULT_CHANNELS) : AudioStream(0, NULL) 
+	{ 
+		_inChans = inCh;
+	}
+		
+	friend class AudioControlEthernet; // may not be required
+	friend class AudioControlEtherTransport;
 
-	void setControl(AudioControlEtherNet * cont) ;
+	void begin(void);
+	void update(void);
+
+	int subscribe(char * name, char * hostName = nullptr); // use this for broadcast
+	int subscribe(char * name, IPAddress remoteIP);
+	void unSubscribe(void); // release the subscribed stream. Packets will not be queued.
 	
-	bool subscribeStream(short stream) ; // subscribe to an audio stream	
-	void releaseStream(void) ; // release the subscribed stream. All-zero buffers will be generated.
-	short getMyStream(void) ; // get the ID of my subscribed stream	
+	int droppedFrames(bool reset = true);	// get and reset the number of dropped frames
+	int missedTransmit(bool reset = true); // failed to transmit - perhaps out of AudioMemory
+protected:	
+	//unsigned long getCurPktNo(void) { return _currentPkt_I;} // user side 
+	int getPktsInQueue();
+	int itim; //debug
 
-	unsigned long getCurPktNo(void) { return currentPacket_I;}; 
-	
-	// need friend class AudioControlEtherNet; // work with the WIZNET control class
-protected:
-	short getNextStreamIndex(short thisStream); //get the next active streamID
-	static audio_block_t *local_block_I[MAXCHANNELS];
+	int getMyStream(void) { return _myStreamI; } // get the ID of my subscribed stream
 
-//  IO handling is by the Ethernet library
-	static void isr(void);
+	std::queue <queuePkt> _myQueueI;
+	bool update_responsibility = false;
 
 private:
-	bool inputBegun = false;
-	AudioControlEtherNet * myControl_I ;
-	short _myStream_I; // unsubscribed at start
-	unsigned long currentPacket_I;
-	short _myObjectID ; // registered ID for control queue data.
+	uint16_t _inChans;
+	int _myStreamI = -1; 	// unsubscribed at start
+	int _mySubI = -1;  		// subscription index
 
 	// internal buffers and pointers
-	audio_block_t zeroBlockI; // a block of zero samples.
+	audio_block_t * new_block[MAXCHANNELS];
+	
+	// internal status and control 
+	bool inputBegun = false;
 
-	// internal status and control
-	//short qq;
-	short it_report_cntr;
-	long blocksRecd_I, missingBlocks_I;
+
+//	int _queueLowWater = QUEUE_LOW_WATER; // net quality & delay. Increase if poor qual
+ 
+	int _currentBuffer = 0; // may take several calls to fill the packet
+	int qUsedSamples = 0;		// 
+	 
+	//debug
+	int npiq; //there were no packets to process in the queue
+	uint32_t _lastQFrameNum;
+	uint32_t framesDropped = 0;
+	uint32_t didNotTransmit = 0;
+	uint32_t lastUpdate;
+	void print6pkt(queuePkt * pkt, int first, int last);
+	void print3buf(int indx, int first, int last);
 };
-#endif
+
+
