@@ -120,7 +120,7 @@ Only one subscription is permitted per VBAN stream for both inputs and outputs. 
 
 Only one *`AudioConnection`* is allowed to any individual output channel.
 
-*`subscribe(streamName, hostName)`* connects to an incoming stream. *`hostName`* may be omitted for output streams where the stream is to be broadcast, or for inputs where there is only one other host emitting that streamName on the network. Currently this form of *`subscribe()`* is not enabled for output streams. Subscriptions by fully-qualified hostName is not yet supported.
+*`subscribe(streamName, hostName)`* connects to an incoming stream. *`hostName`* may be omitted for output streams where the stream is to be broadcast, or for inputs where there is only one other host emitting that streamName on the network. Currently this form of *`subscribe()`* is not enabled for output streams. Subscriptions by fully-qualified hostName are not yet supported.
 
 *`Subscribe(streamName, IPAddress)`* acts similarly for output. For broadcast output streams, omit the second argument. IPAddress can either be a broadcast address, obtained with *`getBroadcastIP()`* or the full IPV4 address.
 
