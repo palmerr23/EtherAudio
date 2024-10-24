@@ -299,4 +299,6 @@ MIDI messages may be transferred using the Service sub-protocol (untested).
 ## Thanks
 Special thanks go to Shawn Silverman for assistance in ironing out the network layer bugs. 
 
+Thanks also to Vincent Burel for the valueable assistance with all things VBAN.
+
 Processed with https://products.aspose.app/words/conversion/word-to-md
