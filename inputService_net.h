@@ -16,10 +16,8 @@
 #include "audio_net.h"
 #include "control_ethernet.h"
 
-#define IS_DEBUG
+//#define IS_DEBUG
 
- 
-//#define DEFAULT_INQ_SIZE	8
 
 extern  AudioControlEtherTransport etherTran; // handles all stream and subscription traffic
 

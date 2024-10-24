@@ -46,8 +46,9 @@ void AudioInputNet::begin(void)
 		memset(new_block[i]->data, 0, AUDIO_BLOCK_SAMPLES * 2);
 	}
 	inputBegun = true;
-	
+#ifdef IN_DEBUG
 	Serial.printf("IN: inputNet.begin() complete, allocated OK %i\n", new_block[0] != nullptr );
+#endif
 }
 
 
@@ -56,17 +57,15 @@ void AudioInputNet::begin(void)
 
 void AudioInputNet::update(void)
 {
- static bool printMe = false;
-	itim++;
+	static bool printMe = false;
 #ifdef IN_DEBUG
 	printMe = itim % 500 == 0 &&  millis() > 4000;
 	itim++;
-#endif
 	
 	if(millis() - lastUpdate > 4)
 		Serial.printf("*** Missed update %i\n", _myStreamI);
 	lastUpdate = millis();
-	
+#endif	
 	if(!etherTran.linkIsUp()) //  uninitialised or disconnected
 		return;
 
@@ -85,7 +84,9 @@ void AudioInputNet::update(void)
 	
 	if(etherTran.streamsIn[_myStreamI].active == false)
 	{ 
+#ifdef IN_DEBUG
 		if(printMe) Serial.println("*** Inactive stream");
+#endif
 		return;
 	}
 
@@ -116,11 +117,9 @@ void AudioInputNet::update(void)
 		if(pkt->hdr.nuFrame != (_lastQFrameNum + 1)) // dropped packet
 		{
 			framesDropped++;
-			if(framesDropped % 200 == 0)
 #ifdef IN_DEBUG
+			if(framesDropped % 200 == 0)
 				Serial.printf("++++++ In dropped frame %i, %i, q size %i\n", pkt->hdr.nuFrame, _lastQFrameNum, _myQueueI.size());
-#else
-					;
 #endif
 		}
 		
@@ -143,14 +142,18 @@ void AudioInputNet::update(void)
 		if(available > needed) // More than enough data in this packet. Use the rest for next buffer set.
 		{
 			qUsedSamples += copyThisBlock;	
+#ifdef IN_DEBUG
 			if(_currentBuffer != AUDIO_BLOCK_SAMPLES) Serial.println("*** I upd: Full buffer not full");
+#endif
 			// leave _lastQFrameNum alone: coming back to this packet next time
 				break; // buffer is full, so straight to transmit
 		}
 
 		if (available <= needed) // All samples used - free the packet
 		{
+#ifdef IN_DEBUG
 			if(available == needed && _currentBuffer != AUDIO_BLOCK_SAMPLES) Serial.println("*** Full buffer not full _B");
+#endif
 			qUsedSamples = 0;
 			_lastQFrameNum = pkt->hdr.nuFrame; // frame sequence check
 			cli(); // may not be required - already inside software interrupt
@@ -248,10 +251,10 @@ int AudioInputNet::subscribe(char * streamName, IPAddress remoteIP)
 		 strncpy(etherTran.subsIn[emptySlot].streamName, streamName, VBAN_STREAM_NAME_LENGTH-1);
 		 strcpy(etherTran.subsIn[emptySlot].streamName, "?");
 		 etherTran.subsIn[emptySlot].ipAddress = remoteIP;
-		 #ifdef IN_DEBUG
+#ifdef IN_DEBUG
 		 Serial.printf("--Subscribed Audio In to '%s', slot %i, IP ", streamName, emptySlot);
 		 Serial.println(remoteIP);
-		 #endif
+#endif
 		_mySubI = emptySlot;
 		 return emptySlot;
 	 }

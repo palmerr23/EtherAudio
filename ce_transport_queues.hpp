@@ -95,7 +95,9 @@ bool AudioControlEtherTransport::addPacketToQueue(int inStream, pktType type)
 	streamsIn[inStream].lastPktTime = millis();  // register packet time, even if we can't queue it
 	
 	std::queue <queuePkt> *qPtr = etherTran.subsIn[etherTran.streamsIn[inStream].subscription].qPtr;
+#ifdef CE_DEBUG
 	int sub = streamsIn[inStream].subscription;
+#endif
 	if(qPtr == nullptr)
 	{
 		if(etherTran.printMe || type != PKT_AUDIO)
@@ -108,7 +110,6 @@ bool AudioControlEtherTransport::addPacketToQueue(int inStream, pktType type)
 		return 0;
 	}
 
-	//Serial.print("B");
 	static int dumped = 0;
 	cli();
 		int siz = qPtr->size(); // near enough. Update() may consume 1 or 2 packets before the push() below
@@ -125,7 +126,7 @@ bool AudioControlEtherTransport::addPacketToQueue(int inStream, pktType type)
 		}
 		return 0;
 	}
-		//Serial.print("C");
+
 	uint32_t streamLastFrame = etherTran.streamsIn[inStream].hdr.nuFrame;
 	int channels, samples, dataSize;
 	
@@ -197,20 +198,26 @@ int AudioControlEtherTransport::getRegisterStreamId(const uint8_t * packet, IPAd
 	if(type == PKT_AUDIO)
 		if (hdr.format_SR == OK_VBAN_AUDIO_PROTO  && hdr.format_bit != OK_VBAN_FMT)
 		{
+#ifdef CE_DEBUG
 			if(printMe) Serial.printf("******* gRS bad audio\n");
+#endif
 			return EOQ;
 		}
 		
 	if(type == PKT_TEXT)
 	{
+#ifdef CE_DEBUG
 		if(printMe) Serial.printf("******* gRS TEXT packet\n");
+#endif
 		return EOQ;
 	}
 
 	// don't queue ID packets
 	if((type == PKT_SERVICE) && (hdr.format_SR == VBAN_SERVICE_ID))
 	{
+#ifdef CE_DEBUG
 		if(printMe) Serial.printf("******* gRS bad Service\n");
+#endif
 		return EOQ;
 	}
 

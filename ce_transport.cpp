@@ -64,9 +64,9 @@ bool AudioControlEtherTransport::begin()
 	if(!_udpPort)
 	_udpPort = VBAN_UDP_PORT;
 
-	//uint8_t udpval;	 
+#ifdef CE_DEBUG
 	Serial.print("CE: BEGIN ");
-	
+#endif
 	initQueues(); // before packets start appearing
 	
 	// start the execution of updateNet() on yield() and delay()
@@ -79,7 +79,9 @@ bool AudioControlEtherTransport::begin()
 
 	// **** do all other initialisation before starting ethernet - as process  may abort on failure
 	etherTranBegun = etherStart(); // no further ethernet or packet processing if failed
+#ifdef CE_DEBUG
 	Serial.println("CE: begin() complete");
+#endif
   return etherTranBegun;
 } // begin
 
@@ -91,14 +93,16 @@ bool AudioControlEtherTransport::linkIsUp(void)
 }
 
 // start or restart network services
+// *** active restart handling disabled for now ***
 bool AudioControlEtherTransport::etherStart(void) 
 { 
-	static bool udpBegun = false; // static needed if restart calls this code
-	static bool MDNSbegun = false;
-	static bool etherBegun = false;
+	//static bool udpBegun = false; // static needed if restart calls this code
+	//static bool MDNSbegun = false;
+  //static bool etherBegun = false;
 	bool myLinkOn; 
+#ifdef CE_DEBUG
   Serial.println("----> EtherStart");
-
+#endif
 
 	if(!Ethernet.begin())
 	{
@@ -106,10 +110,9 @@ bool AudioControlEtherTransport::etherStart(void)
 		myLinkOn = false;
 		return false;
 	}
-	else
-		etherBegun = true;
-	
-	Serial.println("EtherStart: get DHCP");
+	//else
+	//	etherBegun = true;
+
 	if (!Ethernet.waitForLocalIP(DHCP_TIMEOUT)) {
     printf("EtherStart: Failed to get IP address from DHCP\r\n");
     return false;
@@ -143,7 +146,7 @@ bool AudioControlEtherTransport::etherStart(void)
       Serial.println("ERROR: Adding MDNS responder service.");
 			return false;
     } else {
-			MDNSbegun = true;
+			//MDNSbegun = true;
 	#ifdef CE_DEBUG
 			Serial.printf("Started mDNS service:\r\n"
 										"    Name: %s\r\n"
@@ -165,10 +168,12 @@ bool AudioControlEtherTransport::etherStart(void)
 	{
 		Serial.println("Failed to start UDP listener");
 	}
-	else
-		udpBegun = true;
+	//else
+	//	udpBegun = true;
 	myLinkOn = Ethernet.linkState(); 
+#ifdef CE_DEBUG
 	Serial.printf("CE: etherStart complete. Status = '%s'\n", (myLinkOn ) ? "Conn" : "Not Conn"); 
+#endif
  return true;
 }
 
@@ -194,7 +199,7 @@ static void updateNet(void) //AudioControlEtherTransport::
 
 	static uint32_t lastLinkTestTime;
 	//static uint32_t lastConnect = 0;	
-	static uint32_t ccc = 0;  
+
 	
 	if(!etherTran.etherTranBegun) // no processing until after begin() completes
 		return;
@@ -202,6 +207,7 @@ static void updateNet(void) //AudioControlEtherTransport::
 	etherTran.printMe = false; // 
 	//etherTran.eprintMe = false;
 #ifdef CE_DEBUG
+	 static uint32_t ccc = 0;  
 	 if((millis() - ccc) > 2000) 
 	 {
 		etherTran.printMe = true;
@@ -212,7 +218,10 @@ static void updateNet(void) //AudioControlEtherTransport::
 	if(!etherTran.linkIsUp()) 
 	{	
 		return; // abort further processing while link is down
+		// *** abort any attempt to actively reconnect for now
+#ifdef CE_DEBUG
 		if(etherTran.printMe) Serial.printf("No ethernet link begun %i, state %i\n", etherTran.etherTranBegun, Ethernet.linkState());
+#endif
 		// try to reconnect if last try was long enough ago
 		if((millis() - lastLinkTestTime) > DISCONNECT_RETRY)
 		{
@@ -221,8 +230,6 @@ static void updateNet(void) //AudioControlEtherTransport::
 			lastLinkTestTime = millis();
 		}
 	//	if(!etherTran.linkIsUp()) return;
-			
-			
 	}
 	else
 		lastLinkTestTime = millis();
@@ -358,7 +365,7 @@ pktType AudioControlEtherTransport::packetTest(vban_header hdr)
 				if (hdr.format_nbc == VBAN_SERVICE_CHAT)
 				{
 #ifdef CE_DEBUG	
-					if(etherTran.printMe) Serial.printf("PT: CHAT len = %i\n",udp.size() - VBAN_HDR_SIZE);
+					if(etherTran.printMe) Serial.printf("PT: CHAT len = %i\n", udp.size() - VBAN_HDR_SIZE);
 #endif
 					return PKT_CHAT;
 				}
@@ -368,8 +375,7 @@ pktType AudioControlEtherTransport::packetTest(vban_header hdr)
 			return PKT_SERVICE;
 			
 			
-			case VBAN_SERIAL_SHIFTED :
-				
+			case VBAN_SERIAL_SHIFTED : // not implemented				
 				if(hdr.format_bit == VBAN_MIDI_SHIFTED)
 				{
 #ifdef CE_DEBUG	
@@ -382,7 +388,7 @@ pktType AudioControlEtherTransport::packetTest(vban_header hdr)
 #endif
 				return PKT_SERIAL;
 				
-			case VBAN_TEXT_SHIFTED :
+			case VBAN_TEXT_SHIFTED : // not implemented
 #ifdef CE_DEBUG	
 				Serial.println("PT: Text");
 #endif
@@ -427,8 +433,7 @@ void AudioControlEtherTransport::sendPkts() // Ethernet/UDP specific volatile in
 				else
 #ifdef CE_DEBUG	
 					if(printMe) Serial.println("^^^^Did not send");
-#endif
-					
+#endif	
 				return;
 			}
 		}

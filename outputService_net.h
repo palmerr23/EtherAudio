@@ -13,7 +13,7 @@
 #include "audio_net.h"
 #include "control_ethernet.h"
 
-#define OS_DEBUG
+//#define OS_DEBUG
 
 /*
  * This file  handles logical VBAN text output and control functions

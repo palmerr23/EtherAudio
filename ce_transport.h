@@ -27,7 +27,7 @@
 #include "control_ethernet.h"
 #include "IPAddress.h"
 
-#define CE_DEBUG
+//#define CE_DEBUG
 
 #define CTRL_ETHERNET_DO_LOOP_IN_YIELD // ethernet regular updating hooks into yield() and delay(), no need for explicit calls to xxx.updateNet() in mainline code
 

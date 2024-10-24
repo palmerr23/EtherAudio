@@ -39,8 +39,8 @@ void AudioOutputServiceNet::begin(void)
 bool AudioOutputServiceNet::send(uint8_t *data, int length, char* streamName, uint8_t sType, IPAddress remoteIP)
 {
 	static queuePkt pkt; // buffer for outgoing packet
-	static int otim = 0;
 #ifdef OS_DEBUG
+	static int otim = 0;
 	printMe = otim % 50 == 0 &&  millis() > 4000;
 	otim++;
 #else
@@ -56,7 +56,9 @@ bool AudioOutputServiceNet::send(uint8_t *data, int length, char* streamName, ui
 	
 	if(_myStreamO == EOQ || !outputBegun) // uninitialised / unsubscribed
 	{	
+#ifdef OS_DEBUG
 		otim = 0;
+#endif
 		return  false;
 	}
 
@@ -92,7 +94,6 @@ bool AudioOutputServiceNet::send(uint8_t *data, int length, char* streamName, ui
 	if(printMe) Serial.printf("Pushed packet, Qlen %i, ", _myQueueO.size());
 	//printHdr(&pkt.hdr);
 	//Serial.printf("OS_send: queued len %i, SR 0x%02X, NBC %i, sType %i, len %i. '%c%c%c'\n", length, pkt.hdr.format_SR, pkt.hdr.format_nbc, sType, pkt.samplesUsed, (char)pkt.c.content[0], (char)pkt.c.content[1],(char)pkt.c.content[2]);	
-	
 #endif
 	return true;
 }
@@ -144,9 +145,7 @@ int AudioOutputServiceNet::missedTransmit(bool reset)
 void AudioOutputServiceNet::printHdr(vban_header *hdr)
 {
 #ifdef OS_DEBUG
-
 	Serial.printf("Hdr: '%c' SR 0x%02X, nbs 0x%02X, nbc 0x%02X, bit 0x%02X, stream '%s' frame %i\n", (char)hdr->vban, hdr->format_SR, hdr->format_nbs, hdr->format_nbc, hdr->format_bit, hdr->streamname, hdr->nuFrame);
-
 #endif
 }
 

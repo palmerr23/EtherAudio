@@ -14,7 +14,7 @@
 #include "audio_net.h"
 #include "control_ethernet.h"
 
-#define IN_DEBUG
+//#define IN_DEBUG
 
 //#define MALLOC_BUFS // allows begin() to be called by constructor
 

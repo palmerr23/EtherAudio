@@ -17,8 +17,6 @@
 #include "output_net.h"
 
 
-
-
 void AudioOutputNet::begin(void)
 {
 	if(outputBegun)
@@ -35,8 +33,9 @@ void AudioOutputNet::begin(void)
 	//updateStreamMsgCntr = 371; // set up streamInfo counter
 	outputBegun = true;
 
+#ifdef ON_DEBUG
   Serial.println("ON: outputNet.begin() complete");
-
+#endif
 }
 
 /******************** update **************************/
@@ -44,8 +43,8 @@ void AudioOutputNet::begin(void)
 // we won't transmit zero packets if there are none provided by AudioStream
 void AudioOutputNet::update(void)
 {
-	static int otim = 0;
 #ifdef ON_DEBUG
+	static int otim = 0;
 	printMe = otim % 500 == 0 &&  millis() > 4000;
 	otim++;
 #else
@@ -59,8 +58,8 @@ void AudioOutputNet::update(void)
 	{
 #ifdef ON_DEBUG
 		//if(printMe) Serial.printf("O Down %i %i\n", _myStreamO, outputBegun);
-#endif
 		otim = 0;
+#endif
 		return;
 	}
 	//if(printMe) Serial.print("^^^^O: ");
@@ -177,10 +176,10 @@ int AudioOutputNet::subscribe(char * sName, IPAddress remoteIP)
 		 etherTran.streamsOut[emptySlot].remoteIP = remoteIP;
 		 etherTran.streamsOut[emptySlot].hdr.format_SR = OK_VBAN_AUDIO_PROTO;
 		 etherTran.streamsOut[emptySlot].active = true;
-		 #ifdef ON_DEBUG
+#ifdef ON_DEBUG
 		 Serial.printf("-~~~~-Subscribed Audio out to '%s', slot %i, IP ", sName, emptySlot);
 		 Serial.println(remoteIP);
-		 #endif
+#endif
 		 return emptySlot;
 	}
 	return EOQ;

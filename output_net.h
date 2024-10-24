@@ -16,7 +16,7 @@
 #include "audio_net.h"
 #include "control_ethernet.h"
 
-#define ON_DEBUG
+//#define ON_DEBUG
 
 /*
  * This file just handles high-level block transfers and logical audio and control functions 
