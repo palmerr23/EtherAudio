@@ -180,8 +180,7 @@ bool AudioControlEtherTransport::etherStart(void)
 void AudioControlEtherTransport::updateIP(void)
 {
 	_myIP = Ethernet.localIP();
-	_myBroadcastIP = _myIP;
-	_myBroadcastIP[3] = 255;
+	_myBroadcastIP =  Ethernet.broadcastIP();
 }
 /**************** ERSATZ UPDATE ***********************/
 /* There is no regular update() function as this is not an AudioStream object
